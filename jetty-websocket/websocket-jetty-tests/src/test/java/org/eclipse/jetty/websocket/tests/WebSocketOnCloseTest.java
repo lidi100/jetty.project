@@ -133,26 +133,6 @@ public class WebSocketOnCloseTest
     }
 
     @Test
-    public void abnormalCloseFromOnClose() throws Exception
-    {
-        BlockingClientEndpoint clientEndpoint = new BlockingClientEndpoint();
-        serverEndpoint.setOnClose((session) ->
-        {
-            session.close(StatusCode.SERVER_ERROR, "abnormal close reason");
-            clientEndpoint.unBlockClose();
-        });
-
-        URI uri = new URI("ws://localhost:" + connector.getLocalPort() + "/");
-        client.connect(clientEndpoint, uri).get(5, TimeUnit.SECONDS);
-        assertTrue(serverEndpoint.openLatch.await(5, TimeUnit.SECONDS));
-
-        serverEndpoint.session.close(StatusCode.NORMAL, "normal first close");
-        assertTrue(clientEndpoint.closeLatch.await(5, TimeUnit.SECONDS));
-        assertThat(clientEndpoint.statusCode, is(StatusCode.SERVER_ERROR));
-        assertThat(clientEndpoint.reason, is("abnormal close reason"));
-    }
-
-    @Test
     public void abnormalStatusDoesNotChange() throws Exception
     {
         BlockingClientEndpoint clientEndpoint = new BlockingClientEndpoint();
