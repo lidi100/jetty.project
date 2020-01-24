@@ -23,7 +23,7 @@ import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-public class WebSocketOnCloseTest
+public class JettyWebSocketOnCloseTest
 {
     private Server server;
     private ServerConnector connector;
