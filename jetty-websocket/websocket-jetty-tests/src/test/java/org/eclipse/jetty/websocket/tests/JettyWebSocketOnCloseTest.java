@@ -18,9 +18,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class JettyWebSocketOnCloseTest
@@ -103,12 +103,12 @@ public class JettyWebSocketOnCloseTest
     @Test
     public void changeStatusCodeInOnClose() throws Exception
     {
-        serverEndpoint.setOnClose((session) -> session.close(StatusCode.SERVICE_RESTART, "custom close reason"));
-
         EventSocket clientEndpoint = new EventSocket();
         URI uri = new URI("ws://localhost:" + connector.getLocalPort() + "/");
         client.connect(clientEndpoint, uri).get(5, TimeUnit.SECONDS);
+
         assertTrue(serverEndpoint.openLatch.await(5, TimeUnit.SECONDS));
+        serverEndpoint.setOnClose((session) -> session.close(StatusCode.SERVICE_RESTART, "custom close reason"));
 
         clientEndpoint.session.close();
         assertTrue(clientEndpoint.closeLatch.await(5, TimeUnit.SECONDS));
@@ -119,12 +119,12 @@ public class JettyWebSocketOnCloseTest
     @Test
     public void secondCloseFromOnCloseFails() throws Exception
     {
-        serverEndpoint.setOnClose(Session::close);
-
         EventSocket clientEndpoint = new EventSocket();
         URI uri = new URI("ws://localhost:" + connector.getLocalPort() + "/");
         client.connect(clientEndpoint, uri).get(5, TimeUnit.SECONDS);
+
         assertTrue(serverEndpoint.openLatch.await(5, TimeUnit.SECONDS));
+        serverEndpoint.setOnClose(Session::close);
 
         serverEndpoint.session.close(StatusCode.NORMAL, "first close");
         assertTrue(clientEndpoint.closeLatch.await(5, TimeUnit.SECONDS));
@@ -136,15 +136,15 @@ public class JettyWebSocketOnCloseTest
     public void abnormalStatusDoesNotChange() throws Exception
     {
         BlockingClientEndpoint clientEndpoint = new BlockingClientEndpoint();
+        URI uri = new URI("ws://localhost:" + connector.getLocalPort() + "/");
+        client.connect(clientEndpoint, uri).get(5, TimeUnit.SECONDS);
+
+        assertTrue(serverEndpoint.openLatch.await(5, TimeUnit.SECONDS));
         serverEndpoint.setOnClose((session) ->
         {
             session.close(StatusCode.SERVER_ERROR, "abnormal close 2");
             clientEndpoint.unBlockClose();
         });
-
-        URI uri = new URI("ws://localhost:" + connector.getLocalPort() + "/");
-        client.connect(clientEndpoint, uri).get(5, TimeUnit.SECONDS);
-        assertTrue(serverEndpoint.openLatch.await(5, TimeUnit.SECONDS));
 
         serverEndpoint.session.close(StatusCode.PROTOCOL, "abnormal close 1");
         assertTrue(clientEndpoint.closeLatch.await(5, TimeUnit.SECONDS));
@@ -156,21 +156,22 @@ public class JettyWebSocketOnCloseTest
     public void onErrorOccurringAfterOnClose() throws Exception
     {
         EventSocket clientEndpoint = new EventSocket();
+        URI uri = new URI("ws://localhost:" + connector.getLocalPort() + "/");
+        client.connect(clientEndpoint, uri).get(5, TimeUnit.SECONDS);
+
+        assertTrue(serverEndpoint.openLatch.await(5, TimeUnit.SECONDS));
         serverEndpoint.setOnClose((session) ->
         {
             throw new RuntimeException("trigger onError from onClose");
         });
 
-        URI uri = new URI("ws://localhost:" + connector.getLocalPort() + "/");
-        client.connect(clientEndpoint, uri).get(5, TimeUnit.SECONDS);
-        assertTrue(serverEndpoint.openLatch.await(5, TimeUnit.SECONDS));
-
-        serverEndpoint.session.close();
+        clientEndpoint.session.close();
         assertTrue(clientEndpoint.closeLatch.await(5, TimeUnit.SECONDS));
-        assertThat(clientEndpoint.statusCode, is(StatusCode.NO_CODE));
-        assertNull(clientEndpoint.reason);
+        assertThat(clientEndpoint.statusCode, is(StatusCode.SERVER_ERROR));
+        assertThat(clientEndpoint.reason, containsString("trigger onError from onClose"));
 
+        assertTrue(serverEndpoint.errorLatch.await(5, TimeUnit.SECONDS));
         assertThat(serverEndpoint.error, instanceOf(RuntimeException.class));
-        assertThat(serverEndpoint.error.getMessage(), is("trigger onError from onClose"));
+        assertThat(serverEndpoint.error.getMessage(), containsString("trigger onError from onClose"));
     }
 }

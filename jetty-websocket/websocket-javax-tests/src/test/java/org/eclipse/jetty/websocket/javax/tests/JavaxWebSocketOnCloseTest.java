@@ -1,6 +1,7 @@
 package org.eclipse.jetty.websocket.javax.tests;
 
 import java.net.URI;
+import java.nio.channels.ClosedChannelException;
 import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -22,13 +23,13 @@ import org.eclipse.jetty.websocket.javax.server.config.JavaxWebSocketServletCont
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.function.Executable;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.instanceOf;
 import static org.hamcrest.Matchers.is;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class JavaxWebSocketOnCloseTest
@@ -59,8 +60,8 @@ public class JavaxWebSocketOnCloseTest
         @Override
         public void onClose(CloseReason reason)
         {
-            onClose.accept(session);
             super.onClose(reason);
+            onClose.accept(session);
         }
     }
 
@@ -121,7 +122,7 @@ public class JavaxWebSocketOnCloseTest
         URI uri = new URI("ws://localhost:" + connector.getLocalPort() + "/");
         client.connectToServer(clientEndpoint, uri);
 
-        OnCloseEndpoint serverEndpoint = Objects.requireNonNull(serverEndpoints.poll());
+        OnCloseEndpoint serverEndpoint = Objects.requireNonNull(serverEndpoints.poll(5, TimeUnit.SECONDS));
         serverEndpoint.setOnClose((session) -> assertDoesNotThrow(() ->
                 session.close(new CloseReason(CloseCodes.SERVICE_RESTART, "custom close reason"))));
         assertTrue(serverEndpoint.openLatch.await(5, TimeUnit.SECONDS));
@@ -139,9 +140,9 @@ public class JavaxWebSocketOnCloseTest
         URI uri = new URI("ws://localhost:" + connector.getLocalPort() + "/");
         client.connectToServer(clientEndpoint, uri);
 
-        OnCloseEndpoint serverEndpoint = Objects.requireNonNull(serverEndpoints.poll());
+        OnCloseEndpoint serverEndpoint = Objects.requireNonNull(serverEndpoints.poll(5, TimeUnit.SECONDS));
         assertTrue(serverEndpoint.openLatch.await(5, TimeUnit.SECONDS));
-        serverEndpoint.setOnClose((session) -> assertDoesNotThrow((Executable)session::close)); // TODO: THIS SHOULD THROW
+        serverEndpoint.setOnClose((session) -> assertThrows(ClosedChannelException.class, session::close));
 
         serverEndpoint.session.close(new CloseReason(CloseCodes.NORMAL_CLOSURE, "first close"));
         assertTrue(clientEndpoint.closeLatch.await(5, TimeUnit.SECONDS));
@@ -156,11 +157,12 @@ public class JavaxWebSocketOnCloseTest
         URI uri = new URI("ws://localhost:" + connector.getLocalPort() + "/");
         client.connectToServer(clientEndpoint, uri);
 
-        OnCloseEndpoint serverEndpoint = Objects.requireNonNull(serverEndpoints.poll());
+        OnCloseEndpoint serverEndpoint = Objects.requireNonNull(serverEndpoints.poll(5, TimeUnit.SECONDS));
         assertTrue(serverEndpoint.openLatch.await(5, TimeUnit.SECONDS));
         serverEndpoint.setOnClose((session) ->
         {
-            assertDoesNotThrow(() -> session.close(new CloseReason(CloseCodes.UNEXPECTED_CONDITION, "abnormal close 2")));
+            assertThrows(ClosedChannelException.class,
+                () -> session.close(new CloseReason(CloseCodes.UNEXPECTED_CONDITION, "abnormal close 2")));
             clientEndpoint.unBlockClose();
         });
 
@@ -177,19 +179,20 @@ public class JavaxWebSocketOnCloseTest
         URI uri = new URI("ws://localhost:" + connector.getLocalPort() + "/");
         client.connectToServer(clientEndpoint, uri);
 
-        OnCloseEndpoint serverEndpoint = Objects.requireNonNull(serverEndpoints.poll());
+        OnCloseEndpoint serverEndpoint = Objects.requireNonNull(serverEndpoints.poll(5, TimeUnit.SECONDS));
         assertTrue(serverEndpoint.openLatch.await(5, TimeUnit.SECONDS));
         serverEndpoint.setOnClose((session) ->
         {
             throw new RuntimeException("trigger onError from onClose");
         });
 
-        serverEndpoint.session.close();
+        clientEndpoint.session.close();
         assertTrue(clientEndpoint.closeLatch.await(5, TimeUnit.SECONDS));
-        assertThat(clientEndpoint.closeReason.getCloseCode(), is(CloseCodes.NO_STATUS_CODE));
-        assertNull(clientEndpoint.closeReason.getReasonPhrase());
+        assertThat(clientEndpoint.closeReason.getCloseCode(), is(CloseCodes.UNEXPECTED_CONDITION));
+        assertThat(clientEndpoint.closeReason.getReasonPhrase(), containsString("trigger onError from onClose"));
 
+        assertTrue(serverEndpoint.errorLatch.await(5, TimeUnit.SECONDS));
         assertThat(serverEndpoint.error, instanceOf(RuntimeException.class));
-        assertThat(serverEndpoint.error.getMessage(), is("trigger onError from onClose"));
+        assertThat(serverEndpoint.error.getMessage(), containsString("trigger onError from onClose"));
     }
 }
